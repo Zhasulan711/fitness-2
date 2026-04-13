@@ -5,16 +5,27 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 
-type ScrollMode = "vertical" | "horizontal";
-
 type WorkoutPlayerProps = {
   date: string;
   workouts: Workout[];
   onFinish: (payload: { skipped: number; date: string }) => void;
 };
 
-const SWIPE_OFFSET_THRESHOLD = 80;
-const SWIPE_VELOCITY_THRESHOLD = 500;
+const SWIPE_OFFSET_THRESHOLD = 64;
+const SWIPE_VELOCITY_THRESHOLD = 420;
+const swipeVariants = {
+  enter: (direction: 1 | -1) => ({
+    y: direction > 0 ? 120 : -120,
+    opacity: 0.65,
+    scale: 0.985,
+  }),
+  center: { y: 0, opacity: 1, scale: 1 },
+  exit: (direction: 1 | -1) => ({
+    y: direction > 0 ? -160 : 160,
+    opacity: 0.25,
+    scale: 0.965,
+  }),
+};
 
 function ConfirmModal({
   open,
@@ -72,8 +83,8 @@ function ConfirmModal({
 }
 
 export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) {
-  const [mode, setMode] = useState<ScrollMode>("vertical");
   const [index, setIndex] = useState(0);
+  const [swipeDirection, setSwipeDirection] = useState<1 | -1>(1);
   const [skipped, setSkipped] = useState(0);
   const [completedThisSession, setCompletedThisSession] = useState<Record<string, boolean>>({});
   const [showDesc, setShowDesc] = useState(false);
@@ -101,16 +112,11 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
   }, [current]);
 
   const goNext = useCallback(() => {
+    setSwipeDirection(1);
     setShowDesc(false);
     setClipIndex(0);
     setIndex((i) => (workouts.length ? Math.min(i + 1, workouts.length - 1) : 0));
   }, [workouts.length]);
-
-  const goPrev = useCallback(() => {
-    setShowDesc(false);
-    setClipIndex(0);
-    setIndex((i) => Math.max(i - 1, 0));
-  }, []);
 
   const completeCurrent = () => {
     markCompletedForCurrent();
@@ -184,38 +190,43 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
         <AnimatePresence mode="wait">
           <motion.div
             key={current.id}
-            drag={mode === "vertical" ? "y" : "x"}
+            custom={swipeDirection}
+            drag="y"
             dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
-            dragElastic={0.12}
+            dragElastic={0.16}
+            whileDrag={{ scale: 0.985 }}
+            variants={swipeVariants}
             onDragEnd={(_, info) => {
-              if (mode === "vertical") {
-                if (shouldSwipeNext(info.offset.y, info.velocity.y)) {
-                  if (isLast) setFinishOpen(true);
-                  else goNext();
-                  return;
-                }
-                if (shouldSwipePrev(info.offset.y, info.velocity.y)) {
-                  goPrev();
-                }
+              if (shouldSwipeNext(info.offset.y, info.velocity.y)) {
+                goNextClip();
                 return;
               }
-              if (shouldSwipeNext(info.offset.x, info.velocity.x)) goNextClip();
-              if (shouldSwipePrev(info.offset.x, info.velocity.x)) goPrevClip();
+              if (shouldSwipePrev(info.offset.y, info.velocity.y)) goPrevClip();
             }}
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.2 }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", stiffness: 430, damping: 29, mass: 0.7 }}
             className="relative h-full"
           >
-            <video
-              key={`${current.id}-${clipIndex}`}
-              className="h-full w-full bg-black object-contain"
-              src={currentVideo ?? ""}
-              controls
-              playsInline
-              preload="metadata"
-            />
+            {currentVideo ? (
+              <video
+                key={`${current.id}-${clipIndex}`}
+                className="h-full w-full bg-black object-contain"
+                src={currentVideo}
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center px-6 text-center text-zinc-300">
+                <p className="text-sm">
+                  Video is unavailable for this clip. Swipe to the next clip or exercise.
+                </p>
+              </div>
+            )}
 
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
 
@@ -279,25 +290,19 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
                 <div className="pointer-events-auto flex shrink-0 flex-col items-center gap-3 pb-2">
                   <button
                     type="button"
+                    onClick={goPrevClip}
+                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-xl text-white shadow-lg backdrop-blur"
+                    title="Previous clip in this exercise"
+                  >
+                    ◀
+                  </button>
+                  <button
+                    type="button"
                     onClick={goNextClip}
                     className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-xl text-white shadow-lg backdrop-blur"
                     title="Next clip in this exercise"
                   >
-                    🎬
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMode((m) => (m === "vertical" ? "horizontal" : "vertical"))
-                    }
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-xl text-white shadow-lg backdrop-blur"
-                    title={
-                      mode === "vertical"
-                        ? "Vertical: exercise swipe (TikTok-like)"
-                        : "Horizontal: clip swipe"
-                    }
-                  >
-                    {mode === "vertical" ? "↕" : "↔"}
+                    ▶
                   </button>
                   <button
                     type="button"

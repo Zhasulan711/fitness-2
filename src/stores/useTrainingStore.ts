@@ -157,13 +157,31 @@ export const useTrainingStore = create<TrainingStore>()(
         })),
 
       addVideoToExercise: (category, title, video) =>
-        set((state) => ({
-          workoutLibrary: state.workoutLibrary.map((w) => {
-            if (w.category !== category || w.title !== title) return w;
-            if (w.videos.includes(video)) return w;
-            return { ...w, videos: [...w.videos, video] };
-          }),
-        })),
+        set((state) => {
+          const appendVideo = (workout: Workout): Workout => {
+            if (workout.category !== category || workout.title !== title) return workout;
+            if (workout.videos.includes(video)) return workout;
+            return { ...workout, videos: [...workout.videos, video] };
+          };
+
+          const nextClientWeekDays = Object.fromEntries(
+            Object.entries(state.clientWeekDays).map(([client, days]) => [
+              client,
+              days.map((day) => ({
+                ...day,
+                workouts: day.workouts.map(appendVideo),
+              })),
+            ]),
+          );
+
+          const currentClient = state.profile?.name || DEFAULT_CLIENT_NAME;
+
+          return {
+            workoutLibrary: state.workoutLibrary.map(appendVideo),
+            clientWeekDays: nextClientWeekDays,
+            weekDays: nextClientWeekDays[currentClient] ?? state.weekDays,
+          };
+        }),
 
       assignWorkoutToDate: (date, workout, clientName) =>
         set((state) => {
@@ -182,12 +200,24 @@ export const useTrainingStore = create<TrainingStore>()(
             );
           })();
           const isCurrentUser = targetClient === (state.profile?.name || DEFAULT_CLIENT_NAME);
+          const workoutLabel = workout.title || "Workout";
+          const message = `${workoutLabel} assigned for ${date}`;
           return {
             clientWeekDays: {
               ...state.clientWeekDays,
               [targetClient]: nextClientDays,
             },
             weekDays: isCurrentUser ? nextClientDays : state.weekDays,
+            notifications: [
+              {
+                id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                message,
+                date: new Date().toISOString(),
+                clientName: targetClient,
+                workoutDate: date,
+              },
+              ...state.notifications,
+            ],
           };
         }),
 
@@ -200,6 +230,12 @@ export const useTrainingStore = create<TrainingStore>()(
             d.date === date ? { ...d, status } : d,
           );
           const isCurrentUser = targetClient === (state.profile?.name || DEFAULT_CLIENT_NAME);
+          const statusMessage =
+            status === "completed"
+              ? `Workout day ${date} marked completed`
+              : status === "missed"
+                ? `Workout day ${date} marked missed`
+                : `Workout day ${date} set to pending`;
           return {
             clientDayStatusByDate: {
               ...state.clientDayStatusByDate,
@@ -213,6 +249,16 @@ export const useTrainingStore = create<TrainingStore>()(
               [targetClient]: nextWeekDays,
             },
             weekDays: isCurrentUser ? nextWeekDays : state.weekDays,
+            notifications: [
+              {
+                id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                message: statusMessage,
+                date: new Date().toISOString(),
+                clientName: targetClient,
+                workoutDate: date,
+              },
+              ...state.notifications,
+            ],
           };
         }),
 

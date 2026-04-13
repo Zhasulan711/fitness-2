@@ -53,10 +53,13 @@ export default function AdminPage() {
     description: "",
   });
 
-  const clients = useMemo(
-    () => [profile?.name || "Client User", "Client Demo 2", "Client Demo 3"],
-    [profile?.name],
-  );
+  const clients = useMemo(() => {
+    const baseClients = Object.keys(clientWeekDays).filter(
+      (name) => name.trim().toLowerCase() !== "trainer admin",
+    );
+    const withDefaults = [...baseClients, "Client Demo 2", "Client Demo 3"];
+    return Array.from(new Set(withDefaults));
+  }, [clientWeekDays]);
 
   const exercisesByCategory = useMemo(() => {
     const grouped = workouts.reduce<Record<WorkoutCategory, Record<string, ExerciseEntry>>>(
