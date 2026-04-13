@@ -13,6 +13,9 @@ type WorkoutPlayerProps = {
   onFinish: (payload: { skipped: number; date: string }) => void;
 };
 
+const SWIPE_OFFSET_THRESHOLD = 80;
+const SWIPE_VELOCITY_THRESHOLD = 500;
+
 function ConfirmModal({
   open,
   title,
@@ -78,8 +81,9 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
   const [confirmNext, setConfirmNext] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
 
-  const current = workouts[index];
-  const isLast = index >= workouts.length - 1;
+  const safeIndex = workouts.length ? Math.min(index, workouts.length - 1) : 0;
+  const current = workouts[safeIndex];
+  const isLast = safeIndex >= workouts.length - 1;
   const legacyVideo =
     current && "video" in (current as unknown as Record<string, unknown>)
       ? ((current as unknown as { video?: string }).video ?? "")
@@ -99,8 +103,14 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
   const goNext = useCallback(() => {
     setShowDesc(false);
     setClipIndex(0);
-    setIndex((i) => Math.min(i + 1, workouts.length - 1));
+    setIndex((i) => (workouts.length ? Math.min(i + 1, workouts.length - 1) : 0));
   }, [workouts.length]);
+
+  const goPrev = useCallback(() => {
+    setShowDesc(false);
+    setClipIndex(0);
+    setIndex((i) => Math.max(i - 1, 0));
+  }, []);
 
   const completeCurrent = () => {
     markCompletedForCurrent();
@@ -132,10 +142,10 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
     () =>
       workouts.map((w, i) => ({
         id: w.id,
-        active: i === index,
+        active: i === safeIndex,
         done: !!completedThisSession[w.id],
       })),
-    [workouts, index, completedThisSession],
+    [workouts, safeIndex, completedThisSession],
   );
 
   const goNextClip = useCallback(() => {
@@ -147,6 +157,12 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
     if (currentVideos.length < 2) return;
     setClipIndex((i) => (i - 1 + currentVideos.length) % currentVideos.length);
   }, [currentVideos.length]);
+
+  const shouldSwipeNext = (offset: number, velocity: number) =>
+    offset < -SWIPE_OFFSET_THRESHOLD || velocity < -SWIPE_VELOCITY_THRESHOLD;
+
+  const shouldSwipePrev = (offset: number, velocity: number) =>
+    offset > SWIPE_OFFSET_THRESHOLD || velocity > SWIPE_VELOCITY_THRESHOLD;
 
   if (!current) {
     return (
@@ -170,15 +186,21 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
             key={current.id}
             drag={mode === "vertical" ? "y" : "x"}
             dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+            dragElastic={0.12}
             onDragEnd={(_, info) => {
-              const threshold = 90;
               if (mode === "vertical") {
-                if (info.offset.y < -threshold) goNextClip();
-                if (info.offset.y > threshold) goPrevClip();
+                if (shouldSwipeNext(info.offset.y, info.velocity.y)) {
+                  if (isLast) setFinishOpen(true);
+                  else goNext();
+                  return;
+                }
+                if (shouldSwipePrev(info.offset.y, info.velocity.y)) {
+                  goPrev();
+                }
                 return;
               }
-              if (info.offset.x < -threshold) goNextClip();
-              if (info.offset.x > threshold) goPrevClip();
+              if (shouldSwipeNext(info.offset.x, info.velocity.x)) goNextClip();
+              if (shouldSwipePrev(info.offset.x, info.velocity.x)) goPrevClip();
             }}
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -269,7 +291,11 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
                       setMode((m) => (m === "vertical" ? "horizontal" : "vertical"))
                     }
                     className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-xl text-white shadow-lg backdrop-blur"
-                    title={mode === "vertical" ? "Switch to horizontal clip swipe" : "Switch to vertical clip swipe"}
+                    title={
+                      mode === "vertical"
+                        ? "Vertical: exercise swipe (TikTok-like)"
+                        : "Horizontal: clip swipe"
+                    }
                   >
                     {mode === "vertical" ? "↕" : "↔"}
                   </button>
@@ -324,7 +350,7 @@ export function WorkoutPlayer({ date, workouts, onFinish }: WorkoutPlayerProps) 
                   Clip {clipIndex + 1}/{Math.max(currentVideos.length, 1)}
                 </span>
                 <span>
-                  Exercise {index + 1}/{workouts.length}
+                  Exercise {safeIndex + 1}/{workouts.length}
                 </span>
               </div>
               <div className="pointer-events-none mt-1 flex justify-center gap-1">
